@@ -133,7 +133,7 @@ server <- function(input, output) {
       paste0("resumen_", input$variable, ".xlsx")
     },
     content = function(file) {
-      variable_real <- diccionario_nombres[[input$variable]]
+      variable_real <- diccionario_nombres[[input$variable]]#De la 136 a 150 sacar para agregar un reactive event
       datos <- CAP[[variable_real]]
       
       resumen <- data.frame(
