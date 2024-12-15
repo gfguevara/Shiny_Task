@@ -1,0 +1,16 @@
+[main 393c524] Modificación de la estructura de la aplicación, incluye análisis univariado, bivariado, multivariado y comparación Antes-Después.
+ Committer: Giovanni Francisco Guevara Vasquez <gfguevara@ujmd.redadmin>
+Your name and email address were configured automatically based
+on your username and hostname. Please check that they are accurate.
+You can suppress this message by setting them explicitly. Run the
+following command and follow the instructions in your editor to edit
+your configuration file:
+
+    git config --global --edit
+
+After doing this, you may fix the identity used for this commit with:
+
+    git commit --amend --reset-author
+
+ 3 files changed, 590 insertions(+), 158 deletions(-)
+ create mode 100644 rsconnect/shinyapps.io/rl4wez-giovanni-guevara/Shiny_Task.dcf
