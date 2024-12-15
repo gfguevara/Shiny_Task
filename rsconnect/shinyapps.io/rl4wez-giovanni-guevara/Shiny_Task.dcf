@@ -1,0 +1,12 @@
+name: Shiny_Task
+title: Shiny_Task
+username: rl4wez-giovanni-guevara
+account: rl4wez-giovanni-guevara
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13448599
+bundleId: 9415492
+url: https://rl4wez-giovanni-guevara.shinyapps.io/Shiny_Task/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
