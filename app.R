@@ -617,7 +617,7 @@ server <- function(input, output) {
             )
           } else {
             anova_table <- anova_summary %>%
-              dplyr::select(any_of(existing_cols)) %>%
+              dplyr::select(dplyr::any_of(existing_cols)) %>%
               dplyr::rename(Factor = term,
                             Df = df,
                             `Sum Sq` = sumsq,
@@ -645,28 +645,28 @@ server <- function(input, output) {
         
         if (!is.null(tukey_result) && !is.null(tukey_result[[var_dicot]])) {
           tukey_df <- as.data.frame(tukey_result[[var_dicot]])
-          tukey_df <- rownames_to_column(tukey_df, var = "Comparación")
+          tukey_df <- tibble::rownames_to_column(tukey_df, var = "Comparación")
           
           # Verificar si las columnas existen antes de seleccionar
           expected_posthoc_cols <- c("diff", "lwr", "upr", "p adj")
-          existing_posthoc_cols <- intersect(expected_posthoc_cols, names(tukey_df))
+          missing_posthoc_cols <- setdiff(expected_posthoc_cols, names(tukey_df))
           
-          if (length(existing_posthoc_cols) < length(expected_posthoc_cols)) {
-            tukey_table <- tibble(
-              Error = "El resultado post-hoc de Tukey no contiene todas las columnas esperadas."
+          if (length(missing_posthoc_cols) > 0) {
+            tukey_table <- tibble::tibble(
+              Error = paste("Las columnas siguientes faltan en el resultado post-hoc de Tukey:", paste(missing_posthoc_cols, collapse = ", "))
             )
           } else {
-            tukey_table <- tukey_df %>%
-              mutate(
-                `Diferencia de medias` = round(diff, 3),
-                `Límite Inferior` = round(lwr, 3),
-                `Límite Superior` = round(upr, 3),
-                `p-valor` = ifelse(`p adj` < 0.001, "< 0.001", round(`p adj`, 3))
-              ) %>%
-              select(`Comparación`, `Diferencia de medias`, `Límite Inferior`, `Límite Superior`, `p-valor`)
+            # Crear la tabla de Tukey de manera manual para evitar errores con select()
+            tukey_table <- tibble::tibble(
+              Comparación = tukey_df$Comparación,
+              `Diferencia de medias` = round(tukey_df$diff, 3),
+              `Límite Inferior` = round(tukey_df$lwr, 3),
+              `Límite Superior` = round(tukey_df$upr, 3),
+              `p-valor` = ifelse(tukey_df$`p adj` < 0.001, "< 0.001", round(tukey_df$`p adj`, 3))
+            )
           }
         } else {
-          tukey_table <- tibble(
+          tukey_table <- tibble::tibble(
             Error = "Error al realizar la prueba post-hoc Tukey."
           )
         }
@@ -689,19 +689,19 @@ server <- function(input, output) {
       })
       
       if (is.null(t_test_result)) {
-        tabla_inferencia <- tibble(
+        tabla_inferencia <- tibble::tibble(
           Error = "Error al ejecutar la prueba t de Student."
         )
       } else {
         # Preparar tablas de inferencia
-        tabla_inferencia <- tibble()
+        tabla_inferencia <- tibble::tibble()
         
         if (mostrar_IC) {
           diferencia_medias <- round(t_test_result$estimate[1] - t_test_result$estimate[2], 2)
           intervalo_inferior <- round(t_test_result$conf.int[1], 3)
           intervalo_superior <- round(t_test_result$conf.int[2], 3)
           
-          tabla_IC <- tibble(
+          tabla_IC <- tibble::tibble(
             `Diferencia de medias` = diferencia_medias,
             `IC 95%` = paste0("[", ifelse(t_test_result$conf.int[1] < -999, "< -999", intervalo_inferior), 
                               ", ", 
@@ -716,13 +716,13 @@ server <- function(input, output) {
           t_stat <- round(t_test_result$statistic, 3)
           p_value <- ifelse(t_test_result$p.value < 0.001, "< 0.001", round(t_test_result$p.value, 3))
           
-          tabla_prueba <- tibble(
+          tabla_prueba <- tibble::tibble(
             `t` = t_stat,
             `p-valor` = p_value
           )
           
           if (mostrar_IC) {
-            tabla_inferencia <- bind_cols(tabla_inferencia, tabla_prueba)
+            tabla_inferencia <- dplyr::bind_cols(tabla_inferencia, tabla_prueba)
           } else {
             tabla_inferencia <- tabla_prueba
           }
