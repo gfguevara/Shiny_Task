@@ -20,16 +20,32 @@ CAP <- read_excel("CAP.xlsx")
 
 #View(CAP)
 
-
-
-# ui
-# Interfaz de usuario (UI)
 # Cargar las librerías necesarias
 library(shiny)
 library(ggplot2)
 library(dplyr)
 library(broom)
 library(scales)
+library(tibble)
+library(RColorBrewer)
+library(multcomp)  # Para comparaciones post-hoc Tukey
+
+# Cargar el dataset
+# Asegúrate de que el archivo CAP_data.csv esté en el mismo directorio que este script
+# CAP <- read.csv("CAP_data.csv", stringsAsFactors = TRUE)
+
+# Definir una función para obtener paletas pastel con suficientes colores
+get_pastel_palette <- function(n, palette = "Pastel1") {
+  if (!(palette %in% rownames(brewer.pal.info))) {
+    stop("Palette name not found in RColorBrewer.")
+  }
+  max_colors <- brewer.pal.info[palette, "maxcolors"]
+  if (n <= max_colors) {
+    return(brewer.pal(n, palette))
+  } else {
+    return(colorRampPalette(brewer.pal(max_colors, palette))(n))
+  }
+}
 
 # Interfaz de usuario (UI)
 ui <- navbarPage("Análisis CAP",
@@ -130,16 +146,16 @@ ui <- navbarPage("Análisis CAP",
                                                      choices = c("Puntaje de Conocimientos" = "Puntaje_C", 
                                                                  "Puntaje de Actitudes" = "Puntaje_A", 
                                                                  "Puntaje de Prácticas" = "Puntaje_P")),
-                                         checkboxInput("eliminar_outliers", "Eliminar valores atípicos", value = FALSE),
-                                         checkboxInput("mostrar_IC", "Mostrar Intervalo de Confianza", value = FALSE),
-                                         checkboxInput("mostrar_prueba", "Mostrar Prueba de Significancia", value = FALSE),
+                                         checkboxInput("eliminar_outliers_biv", "Eliminar valores atípicos", value = FALSE),
+                                         checkboxInput("mostrar_IC_biv", "Mostrar Intervalo de Confianza", value = FALSE),
+                                         checkboxInput("mostrar_prueba_biv", "Mostrar Prueba de Significancia", value = FALSE),
                                          downloadButton("downloadPlot_biv", "Descargar gráfico")
                                        ),
                                        mainPanel(
                                          plotOutput("boxplot_biv"),
                                          tableOutput("tabla_resumen"),
                                          conditionalPanel(
-                                           condition = "input.mostrar_IC || input.mostrar_prueba",
+                                           condition = "input.mostrar_IC_biv || input.mostrar_prueba_biv",
                                            tableOutput("tabla_inferencia")
                                          )
                                        )
@@ -148,10 +164,32 @@ ui <- navbarPage("Análisis CAP",
                             tabPanel("Variables Nominales",
                                      sidebarLayout(
                                        sidebarPanel(
-                                         # Opciones para análisis de variables nominales
+                                         selectInput("var_nom_indep", "Seleccione una variable independiente:", 
+                                                     choices = c("Municipio" = "muni", 
+                                                                 "Grupos Etarios" = "etario", 
+                                                                 "Nivel Educativo" = "nivel_edu", 
+                                                                 "Situación de Empleo" = "empleo_si", 
+                                                                 "Ocupación" = "ocupacion", 
+                                                                 "Ingreso" = "ingreso")),
+                                         selectInput("var_num_dep", "Seleccione una variable dependiente:", 
+                                                     choices = c("Puntaje de Conocimientos" = "Puntaje_C", 
+                                                                 "Puntaje de Actitudes" = "Puntaje_A", 
+                                                                 "Puntaje de Prácticas" = "Puntaje_P")),
+                                         checkboxInput("eliminar_outliers_nom", "Eliminar valores atípicos", value = FALSE),
+                                         checkboxInput("mostrar_anova", "Mostrar Tabla ANOVA", value = FALSE),
+                                         checkboxInput("mostrar_posthoc", "Mostrar Comparación Post-hoc (Tukey)", value = FALSE),
+                                         downloadButton("downloadPlot_nom", "Descargar gráfico")
                                        ),
                                        mainPanel(
-                                         # Output para gráficos bivariados de variables nominales
+                                         plotOutput("boxplot_nom"),
+                                         conditionalPanel(
+                                           condition = "input.mostrar_anova",
+                                           tableOutput("tabla_anova")
+                                         ),
+                                         conditionalPanel(
+                                           condition = "input.mostrar_posthoc",
+                                           tableOutput("tabla_posthoc")
+                                         )
                                        )
                                      )
                             ),
@@ -227,11 +265,17 @@ server <- function(input, output) {
       return(ggplot() + labs(title = "La variable seleccionada no es numérica."))
     }
     
+    var_label <- switch(variable,
+                        "Puntaje_C" = "Puntaje de Conocimientos",
+                        "Puntaje_A" = "Puntaje de Actitudes",
+                        "Puntaje_P" = "Puntaje de Prácticas",
+                        variable)
+    
     p <- ggplot(data, aes_string(x = variable)) +
       geom_histogram(aes(y = ..density..), bins = bins, fill = "#a8ddb5", color = "white", alpha = 0.7) +  # Pastel
       theme_minimal(base_size = 16) +
-      labs(title = paste("Histograma de", input$var_score),
-           x = input$var_score,
+      labs(title = paste("Histograma de", var_label),
+           x = var_label,
            y = "Densidad") +
       theme(
         plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
@@ -256,15 +300,37 @@ server <- function(input, output) {
   # Renderizar gráficos para variables sociodemográficas
   output$plot_soc <- renderPlot({
     var <- input$var_soc
-    var_label <- var  # Asumiendo que las etiquetas ya están en los niveles del factor
+    var_label <- switch(var,
+                        "mes" = "Mes de la encuesta",
+                        "part_prev" = "Participación previa",
+                        "muni" = "Municipio de residencia",
+                        "area" = "Área de residencia",
+                        "edad" = "Edad en años",
+                        "edad_dicot" = "Mayor de 65 años",
+                        "etario" = "Grupos etarios",
+                        "genero" = "Sexo",
+                        "nivel_edu" = "Nivel educativo",
+                        "vive_solo" = "Hogar unipersonal",
+                        "nucleo" = "Tamaño del núcleo familiar",
+                        "empleo_si" = "Situación de empleo",
+                        "ocupacion" = "Ocupación actual",
+                        "ingreso" = "Ingreso promedio mensual",
+                        "edu_sup" = "Estudios superiores",
+                        var)
     var_type <- class(CAP[[var]])
     
     if (var_type %in% c("factor", "character")) {
       CAP[[var]] <- factor(CAP[[var]], levels = names(sort(table(CAP[[var]]), decreasing = TRUE)))
       
+      # Obtener número de niveles
+      num_levels <- length(levels(CAP[[var]]))
+      
+      # Generar una paleta de colores pastel con suficiente número de colores
+      colores_pastel <- get_pastel_palette(num_levels, "Pastel1")
+      
       ggplot(CAP, aes_string(x = var, fill = var)) +
         geom_bar(aes(y = (..count..) / sum(..count..))) +
-        scale_fill_brewer(palette = "Pastel1") +
+        scale_fill_manual(values = colores_pastel) +
         scale_y_continuous(
           limits = c(0, 1), 
           labels = percent_format(), 
@@ -283,13 +349,11 @@ server <- function(input, output) {
              y = "Porcentaje", 
              caption = "Fuente: Encuesta de Conocimientos, Actitudes y Prácticas, departamento de La Libertad, 2023") +
         theme(
-          axis.text.x = element_text(size = 14),
+          axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
           axis.ticks.x = element_blank(),
-          legend.position = "bottom",
-          legend.title = element_blank(),
+          legend.position = "none",  # Eliminar la leyenda
           axis.title = element_text(size = 18),
           axis.text = element_text(size = 14),
-          legend.text = element_text(size = 14),
           plot.caption = element_text(size = 12, hjust = 0.5, face = "italic"),
           plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
         )
@@ -311,15 +375,27 @@ server <- function(input, output) {
   # Renderizar gráficos para variables clínicas
   output$plot_clin <- renderPlot({
     var <- input$var_clin
-    var_label <- var  # Asumiendo que las etiquetas ya están en los niveles del factor
+    var_label <- switch(var,
+                        "enfcro" = "Enfermedad crónica",
+                        "prev_per_dicot" = "Antecedente de COVID-19",
+                        "dosis" = "Dosis de vacuna",
+                        "vacunas_incompletas" = "Vacunas incompletas",
+                        "mortalidad" = "Mortalidad",
+                        var)
     var_type <- class(CAP[[var]])
     
     if (var_type %in% c("factor", "character")) {
       CAP[[var]] <- factor(CAP[[var]], levels = names(sort(table(CAP[[var]]), decreasing = TRUE)))
       
+      # Obtener número de niveles
+      num_levels <- length(levels(CAP[[var]]))
+      
+      # Generar una paleta de colores pastel con suficiente número de colores
+      colores_pastel <- get_pastel_palette(num_levels, "Pastel2")
+      
       ggplot(CAP, aes_string(x = var, fill = var)) +
         geom_bar(aes(y = (..count..) / sum(..count..))) +
-        scale_fill_brewer(palette = "Pastel2") +
+        scale_fill_manual(values = colores_pastel) +
         scale_y_continuous(
           limits = c(0, 1), 
           labels = percent_format(), 
@@ -338,74 +414,17 @@ server <- function(input, output) {
              y = "Porcentaje", 
              caption = "Fuente: Encuesta de Conocimientos, Actitudes y Prácticas, departamento de La Libertad, 2023") +
         theme(
-          axis.text.x = element_text(size = 14),
+          axis.text.x = element_text(size = 14, angle = 45, hjust = 1),
           axis.ticks.x = element_blank(),
-          legend.position = "bottom",
-          legend.title = element_blank(),
+          legend.position = "none",  # Eliminar la leyenda
           axis.title = element_text(size = 18),
           axis.text = element_text(size = 14),
-          legend.text = element_text(size = 14),
           plot.caption = element_text(size = 12, hjust = 0.5, face = "italic"),
           plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
         )
     } else {
       ggplot(CAP, aes_string(x = var)) +
         geom_histogram(bins = 30, fill = "#b2df8a", color = "white") +  # Pastel
-        theme_minimal(base_size = 16) +
-        labs(title = paste("Distribución de", var_label),
-             x = var_label,
-             y = "Frecuencia") +
-        theme(
-          plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
-          axis.title = element_text(size = 18),
-          axis.text = element_text(size = 14)
-        )
-    }
-  })
-  
-  # Renderizar gráficos para variables de exposición
-  output$plot_exp <- renderPlot({
-    var <- input$var_exp
-    var_label <- var  # Asumiendo que las etiquetas ya están en los niveles del factor
-    var_type <- class(CAP[[var]])
-    
-    if (var_type %in% c("factor", "character")) {
-      CAP[[var]] <- factor(CAP[[var]], levels = names(sort(table(CAP[[var]]), decreasing = TRUE)))
-      
-      ggplot(CAP, aes_string(x = var, fill = var)) +
-        geom_bar(aes(y = (..count..) / sum(..count..))) +
-        scale_fill_brewer(palette = "Pastel3") +
-        scale_y_continuous(
-          limits = c(0, 1), 
-          labels = percent_format(), 
-          breaks = seq(0, 1, by = 0.1)
-        ) +
-        geom_text(
-          aes(y = (..count..) / sum(..count..), 
-              label = percent((..count..) / sum(..count..), accuracy = 0.1)),
-          stat = "count", 
-          vjust = -0.5,  
-          size = 5
-        ) +
-        theme_minimal(base_size = 16) +
-        labs(title = paste("Distribución de", var_label),
-             x = "", 
-             y = "Porcentaje", 
-             caption = "Fuente: Encuesta de Conocimientos, Actitudes y Prácticas, departamento de La Libertad, 2023") +
-        theme(
-          axis.text.x = element_text(size = 14),
-          axis.ticks.x = element_blank(),
-          legend.position = "bottom",
-          legend.title = element_blank(),
-          axis.title = element_text(size = 18),
-          axis.text = element_text(size = 14),
-          legend.text = element_text(size = 14),
-          plot.caption = element_text(size = 12, hjust = 0.5, face = "italic"),
-          plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
-        )
-    } else {
-      ggplot(CAP, aes_string(x = var)) +
-        geom_histogram(bins = 30, fill = "#fb9a99", color = "white") +  # Pastel
         theme_minimal(base_size = 16) +
         labs(title = paste("Distribución de", var_label),
              x = var_label,
@@ -496,19 +515,50 @@ server <- function(input, output) {
   )
   
   # Función para generar boxplot y tablas para análisis bivariado
-  generar_boxplot_y_tablas <- function(data, var_dicot, var_num, mostrar_IC, mostrar_prueba) {
-    if (input$eliminar_outliers) {
-      Q1 <- quantile(data[[var_num]], 0.25, na.rm = TRUE)
-      Q3 <- quantile(data[[var_num]], 0.75, na.rm = TRUE)
-      IQR <- Q3 - Q1
-      data <- data[data[[var_num]] >= (Q1 - 1.5 * IQR) & data[[var_num]] <= (Q3 + 1.5 * IQR), ]
+  generar_boxplot_y_tablas <- function(data, var_dicot, var_num, mostrar_IC, mostrar_prueba, eliminar_outliers, mostrar_posthoc = FALSE) {
+    var_dicot_label <- switch(var_dicot,
+                              "mes" = "Mes de la encuesta",
+                              "part_prev" = "Participación previa",
+                              "edad_dicot" = "Mayor de 65 años",
+                              "edu_sup" = "Estudios superiores",
+                              "enfcro" = "Enfermedad crónica",
+                              "prev_per_dicot" = "Antecedente de COVID-19",
+                              "exposicion_dicot" = "Exposición a mensajes educativos",
+                              var_dicot)
+    var_num_label <- switch(var_num,
+                            "Puntaje_C" = "Puntaje de Conocimientos",
+                            "Puntaje_A" = "Puntaje de Actitudes",
+                            "Puntaje_P" = "Puntaje de Prácticas",
+                            var_num)
+    
+    # Verificar que var_num es numérico
+    if (!is.numeric(data[[var_num]])) {
+      return(list(plot = ggplot() + labs(title = "La variable seleccionada no es numérica."),
+                  resumen = NULL,
+                  anova = NULL,
+                  posthoc = NULL))
     }
     
-    var_dicot_label <- var_dicot  # Asumiendo que las etiquetas ya están en los niveles del factor
-    var_num_label <- input$var_num  # Asumiendo que las etiquetas ya están en los nombres de las variables
+    # Convertir var_dicot a factor
+    if (!is.factor(data[[var_dicot]])) {
+      data[[var_dicot]] <- as.factor(data[[var_dicot]])
+    }
     
-    # Definir colores pastel para los grupos (celeste y rosado)
-    colores_pastel <- c("#a6cee3", "#fb9a99")  # Celeste y rosado
+    # Filtrar y eliminar outliers por grupo si se solicita
+    if (eliminar_outliers) {
+      # Aplicar la fórmula Q1 - 1.5*IQR y Q3 + 1.5*IQR dentro de cada grupo
+      data <- data %>%
+        group_by(.data[[var_dicot]]) %>%
+        filter(
+          .data[[var_num]] >= (quantile(.data[[var_num]], 0.25, na.rm = TRUE) - 1.5 * IQR(.data[[var_num]], na.rm = TRUE)) &
+            .data[[var_num]] <= (quantile(.data[[var_num]], 0.75, na.rm = TRUE) + 1.5 * IQR(.data[[var_num]], na.rm = TRUE))
+        ) %>%
+        ungroup()
+    }
+    
+    # Definir colores pastel para los grupos
+    num_levels <- length(unique(data[[var_dicot]]))
+    colores_pastel <- get_pastel_palette(num_levels, "Pastel2")
     
     p <- ggplot(data, aes_string(x = var_dicot, y = var_num, fill = var_dicot)) +
       geom_boxplot() +
@@ -521,72 +571,183 @@ server <- function(input, output) {
         plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
         axis.title = element_text(size = 18),
         axis.text = element_text(size = 14),
-        legend.position = "none"
+        legend.position = "none"  # Eliminar la leyenda
       )
     
     resumen <- data %>%
-      group_by_at(var_dicot) %>%
+      group_by(.data[[var_dicot]]) %>%
       summarise(
         N = n(),
-        `Promedio` = round(mean(get(var_num), na.rm = TRUE), 2),
-        DE = round(sd(get(var_num), na.rm = TRUE), 2)
+        `Promedio` = round(mean(.data[[var_num]], na.rm = TRUE), 2),
+        DE = round(sd(.data[[var_num]], na.rm = TRUE), 2)
       ) %>%
       rename("Grupo" = var_dicot)
     
-    # Realizar la prueba t de Student solo si hay dos grupos
-    if (nlevels(factor(data[[var_dicot]])) == 2) {
-      t_test_result <- t.test(as.formula(paste(var_num, "~", var_dicot)), data = data)
+    # Realizar la prueba ANOVA si hay más de dos niveles
+    if (num_levels > 2) {
+      anova_model <- tryCatch({
+        aov(as.formula(paste(var_num, "~", var_dicot)), data = data)
+      }, error = function(e) {
+        return(NULL)
+      })
       
-      # Preparar tablas de inferencia
-      tabla_inferencia <- list()
-      
-      if (mostrar_IC) {
-        diferencia_medias <- round(t_test_result$estimate[1] - t_test_result$estimate[2], 2)
-        intervalo_inferior <- round(t_test_result$conf.int[1], 3)
-        intervalo_superior <- round(t_test_result$conf.int[2], 3)
-        
-        tabla_IC <- tibble(
-          `Diferencia de medias` = diferencia_medias,
-          `IC 95%` = paste0("[", ifelse(t_test_result$conf.int[1] < -999, "< -999", intervalo_inferior), 
-                            ", ", 
-                            ifelse(t_test_result$conf.int[2] > 999, "> 999", intervalo_superior), 
-                            "]")
+      if (is.null(anova_model)) {
+        anova_table <- tibble(
+          Error = "Error al ejecutar el modelo ANOVA."
         )
+      } else {
+        anova_summary <- tryCatch({
+          broom::tidy(anova_model)
+        }, error = function(e) {
+          return(NULL)
+        })
         
-        tabla_inferencia <- tabla_IC
-      }
-      
-      if (mostrar_prueba) {
-        t_stat <- round(t_test_result$statistic, 3)
-        p_value <- ifelse(t_test_result$p.value < 0.001, "< 0.001", round(t_test_result$p.value, 3))
-        
-        tabla_prueba <- tibble(
-          `t` = t_stat,
-          `p-valor` = p_value
-        )
-        
-        if (mostrar_IC) {
-          tabla_inferencia <- bind_cols(tabla_inferencia, tabla_prueba)
+        if (is.null(anova_summary)) {
+          anova_table <- tibble(
+            Error = "Error al procesar el resumen del modelo ANOVA."
+          )
         } else {
-          tabla_inferencia <- tabla_prueba
+          # Verificar si las columnas existen antes de seleccionar
+          expected_cols <- c("term", "df", "sumsq", "meansq", "statistic", "p.value")
+          existing_cols <- intersect(expected_cols, names(anova_summary))
+          
+          if (length(existing_cols) == 0) {
+            anova_table <- tibble(
+              Error = "El modelo ANOVA no devolvió las columnas esperadas."
+            )
+          } else {
+            anova_table <- anova_summary %>%
+              dplyr::select(any_of(existing_cols)) %>%
+              dplyr::rename(Factor = term,
+                            Df = df,
+                            `Sum Sq` = sumsq,
+                            `Mean Sq` = meansq,
+                            `F value` = statistic,
+                            `Pr(>F)` = p.value) %>%
+              dplyr::mutate(
+                Df = round(Df, 3),
+                `Sum Sq` = round(`Sum Sq`, 3),
+                `Mean Sq` = round(`Mean Sq`, 3),
+                `F value` = round(`F value`, 3),
+                `Pr(>F)` = ifelse(`Pr(>F)` < 0.001, "< 0.001", round(`Pr(>F)`, 3))
+              )
+          }
         }
       }
+      
+      # Realizar comparaciones post-hoc Tukey si se solicita
+      if (mostrar_posthoc && !is.null(anova_model)) {
+        tukey_result <- tryCatch({
+          TukeyHSD(anova_model, conf.level = 0.95)
+        }, error = function(e) {
+          return(NULL)
+        })
+        
+        if (!is.null(tukey_result) && !is.null(tukey_result[[var_dicot]])) {
+          tukey_df <- as.data.frame(tukey_result[[var_dicot]])
+          tukey_df <- rownames_to_column(tukey_df, var = "Comparación")
+          
+          # Verificar si las columnas existen antes de seleccionar
+          expected_posthoc_cols <- c("diff", "lwr", "upr", "p adj")
+          existing_posthoc_cols <- intersect(expected_posthoc_cols, names(tukey_df))
+          
+          if (length(existing_posthoc_cols) < length(expected_posthoc_cols)) {
+            tukey_table <- tibble(
+              Error = "El resultado post-hoc de Tukey no contiene todas las columnas esperadas."
+            )
+          } else {
+            tukey_table <- tukey_df %>%
+              mutate(
+                `Diferencia de medias` = round(diff, 3),
+                `Límite Inferior` = round(lwr, 3),
+                `Límite Superior` = round(upr, 3),
+                `p-valor` = ifelse(`p adj` < 0.001, "< 0.001", round(`p adj`, 3))
+              ) %>%
+              select(`Comparación`, `Diferencia de medias`, `Límite Inferior`, `Límite Superior`, `p-valor`)
+          }
+        } else {
+          tukey_table <- tibble(
+            Error = "Error al realizar la prueba post-hoc Tukey."
+          )
+        }
+      } else {
+        tukey_table <- NULL
+      }
+      
+      # Devolver resultados
+      if (!is.null(tukey_table)) {
+        return(list(plot = p, resumen = resumen, anova = anova_table, posthoc = tukey_table))
+      } else {
+        return(list(plot = p, resumen = resumen, anova = anova_table))
+      }
+    } else if (num_levels == 2) {
+      # Realizar la prueba t de Student
+      t_test_result <- tryCatch({
+        t.test(as.formula(paste(var_num, "~", var_dicot)), data = data)
+      }, error = function(e) {
+        return(NULL)
+      })
+      
+      if (is.null(t_test_result)) {
+        tabla_inferencia <- tibble(
+          Error = "Error al ejecutar la prueba t de Student."
+        )
+      } else {
+        # Preparar tablas de inferencia
+        tabla_inferencia <- tibble()
+        
+        if (mostrar_IC) {
+          diferencia_medias <- round(t_test_result$estimate[1] - t_test_result$estimate[2], 2)
+          intervalo_inferior <- round(t_test_result$conf.int[1], 3)
+          intervalo_superior <- round(t_test_result$conf.int[2], 3)
+          
+          tabla_IC <- tibble(
+            `Diferencia de medias` = diferencia_medias,
+            `IC 95%` = paste0("[", ifelse(t_test_result$conf.int[1] < -999, "< -999", intervalo_inferior), 
+                              ", ", 
+                              ifelse(t_test_result$conf.int[2] > 999, "> 999", intervalo_superior), 
+                              "]")
+          )
+          
+          tabla_inferencia <- tabla_IC
+        }
+        
+        if (mostrar_prueba) {
+          t_stat <- round(t_test_result$statistic, 3)
+          p_value <- ifelse(t_test_result$p.value < 0.001, "< 0.001", round(t_test_result$p.value, 3))
+          
+          tabla_prueba <- tibble(
+            `t` = t_stat,
+            `p-valor` = p_value
+          )
+          
+          if (mostrar_IC) {
+            tabla_inferencia <- bind_cols(tabla_inferencia, tabla_prueba)
+          } else {
+            tabla_inferencia <- tabla_prueba
+          }
+        }
+      }
+      
+      # Devolver resultados
+      return(list(plot = p, resumen = resumen, inferencia = tabla_inferencia))
     } else {
-      tabla_inferencia <- NULL
+      return(list(plot = p, resumen = resumen))
     }
-    
-    return(list(plot = p, resumen = resumen, inferencia = tabla_inferencia))
   }
   
   # SECCIÓN 2: Análisis Bivariado
   
+  # Variables Dicotómicas
   output$boxplot_biv <- renderPlot({
     resultado <- generar_boxplot_y_tablas(
       data = CAP, 
       var_dicot = input$var_dicot, 
       var_num = input$var_num, 
-      mostrar_IC = input$mostrar_IC, 
-      mostrar_prueba = input$mostrar_prueba
+      mostrar_IC = input$mostrar_IC_biv, 
+      mostrar_prueba = input$mostrar_prueba_biv,
+      eliminar_outliers = input$eliminar_outliers_biv,
+      mostrar_posthoc = FALSE  # Comparación post-hoc no en dicotómicas
     )
     resultado$plot
   })
@@ -596,8 +757,10 @@ server <- function(input, output) {
       data = CAP, 
       var_dicot = input$var_dicot, 
       var_num = input$var_num, 
-      mostrar_IC = input$mostrar_IC, 
-      mostrar_prueba = input$mostrar_prueba
+      mostrar_IC = input$mostrar_IC_biv, 
+      mostrar_prueba = input$mostrar_prueba_biv,
+      eliminar_outliers = input$eliminar_outliers_biv,
+      mostrar_posthoc = FALSE  # Comparación post-hoc no en dicotómicas
     )
     resultado$resumen
   }, striped = FALSE, hover = TRUE, align = 'c', digits = 2)
@@ -607,10 +770,21 @@ server <- function(input, output) {
       data = CAP, 
       var_dicot = input$var_dicot, 
       var_num = input$var_num, 
-      mostrar_IC = input$mostrar_IC, 
-      mostrar_prueba = input$mostrar_prueba
+      mostrar_IC = input$mostrar_IC_biv, 
+      mostrar_prueba = input$mostrar_prueba_biv,
+      eliminar_outliers = input$eliminar_outliers_biv,
+      mostrar_posthoc = FALSE  # Comparación post-hoc no en dicotómicas
     )
-    resultado$inferencia
+    # Determinar si se trata de ANOVA o t-test
+    if (!is.null(resultado$anova) && !"Error" %in% names(resultado$anova)) {
+      return(resultado$anova)
+    } else if (!is.null(resultado$inferencia) && !"Error" %in% names(resultado$inferencia)) {
+      return(resultado$inferencia)
+    } else if (!is.null(resultado$posthoc) && !"Error" %in% names(resultado$posthoc)) {
+      return(resultado$posthoc)
+    } else {
+      return(resultado$anova)  # Retornar el error si existe
+    }
   }, striped = FALSE, hover = TRUE, align = 'c', digits = 3)
   
   # Descarga de gráficos bivariados
@@ -619,11 +793,94 @@ server <- function(input, output) {
       paste("boxplot_", input$var_dicot, "_", input$var_num, ".png", sep = "")
     },
     content = function(file) {
-      ggsave(file, plot = last_plot(), device = "png")
+      resultado <- generar_boxplot_y_tablas(
+        data = CAP, 
+        var_dicot = input$var_dicot, 
+        var_num = input$var_num, 
+        mostrar_IC = input$mostrar_IC_biv, 
+        mostrar_prueba = input$mostrar_prueba_biv,
+        eliminar_outliers = input$eliminar_outliers_biv,
+        mostrar_posthoc = FALSE  # Comparación post-hoc no en dicotómicas
+      )
+      if (!is.null(resultado$plot)) {
+        ggsave(file, plot = resultado$plot, device = "png")
+      }
     }
   )
   
-} # Cierre de server
+  # SECCIÓN 2: Variables Nominales
+  
+  # Renderizar boxplot para Variables Nominales
+  output$boxplot_nom <- renderPlot({
+    resultado <- generar_boxplot_y_tablas(
+      data = CAP, 
+      var_dicot = input$var_nom_indep, 
+      var_num = input$var_num_dep, 
+      mostrar_IC = FALSE,  # No se requiere Intervalo de Confianza en Nominales
+      mostrar_prueba = FALSE,  # Se maneja en tablas separadas
+      eliminar_outliers = input$eliminar_outliers_nom,
+      mostrar_posthoc = input$mostrar_posthoc
+    )
+    resultado$plot
+  })
+  
+  # Renderizar Tabla ANOVA
+  output$tabla_anova <- renderTable({
+    resultado <- generar_boxplot_y_tablas(
+      data = CAP, 
+      var_dicot = input$var_nom_indep, 
+      var_num = input$var_num_dep, 
+      mostrar_IC = FALSE, 
+      mostrar_prueba = FALSE,
+      eliminar_outliers = input$eliminar_outliers_nom,
+      mostrar_posthoc = input$mostrar_posthoc
+    )
+    if (!is.null(resultado$anova) && !"Error" %in% names(resultado$anova)) {
+      return(resultado$anova)
+    } else {
+      return(resultado$anova)  # Retornar el error si existe
+    }
+  }, striped = FALSE, hover = TRUE, align = 'c', digits = 3)
+  
+  # Renderizar Tabla Post-hoc Tukey
+  output$tabla_posthoc <- renderTable({
+    resultado <- generar_boxplot_y_tablas(
+      data = CAP, 
+      var_dicot = input$var_nom_indep, 
+      var_num = input$var_num_dep, 
+      mostrar_IC = FALSE, 
+      mostrar_prueba = FALSE,
+      eliminar_outliers = input$eliminar_outliers_nom,
+      mostrar_posthoc = input$mostrar_posthoc
+    )
+    if (!is.null(resultado$posthoc) && !"Error" %in% names(resultado$posthoc)) {
+      return(resultado$posthoc)
+    } else {
+      return(resultado$posthoc)  # Retornar el error si existe
+    }
+  }, striped = FALSE, hover = TRUE, align = 'c', digits = 3)
+  
+  # Descarga de boxplot nominales
+  output$downloadPlot_nom <- downloadHandler(
+    filename = function() {
+      paste("boxplot_nominales_", input$var_nom_indep, "_", input$var_num_dep, ".png", sep = "")
+    },
+    content = function(file) {
+      resultado <- generar_boxplot_y_tablas(
+        data = CAP, 
+        var_dicot = input$var_nom_indep, 
+        var_num = input$var_num_dep, 
+        mostrar_IC = FALSE, 
+        mostrar_prueba = FALSE,
+        eliminar_outliers = input$eliminar_outliers_nom,
+        mostrar_posthoc = input$mostrar_posthoc
+      )
+      if (!is.null(resultado$plot)) {
+        ggsave(file, plot = resultado$plot, device = "png")
+      }
+    }
+  )
+}
 
 # Ejecutar la aplicación
 shinyApp(ui = ui, server = server)
