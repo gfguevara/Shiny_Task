@@ -1,11 +1,9 @@
 # Instala las librerías necesarias si no las tienes
 # install.packages("shiny")
 # install.packages("ggplot2")
-#install.packages("shinythemes")
-#install.packages("kableExtra")
-#install.packages("shinythemes")
-#install.packages("ggsave")
-
+# install.packages("shinythemes")
+# install.packages("kableExtra")
+# install.packages("ggsave")
 
 # Cargar las librerías necesarias
 library(shiny)
@@ -24,10 +22,24 @@ library(PerformanceAnalytics)
 library(GGally)
 library(Hmisc)
 library(rlang)             # Para tidy evaluation
-
 library(readxl)
+
+# Cargar el dataset
 CAP <- read_excel("CAP.xlsx")
 #View(CAP)
+
+# Definir una función para obtener paletas pastel con suficientes colores
+get_pastel_palette <- function(n, palette = "Pastel1") {
+  if (!(palette %in% rownames(brewer.pal.info))) {
+    stop("Palette name not found in RColorBrewer.")
+  }
+  max_colors <- brewer.pal.info[palette, "maxcolors"]
+  if (n <= max_colors) {
+    return(brewer.pal(n, palette))
+  } else {
+    return(colorRampPalette(brewer.pal(max_colors, palette))(n))
+  }
+}
 
 # Interfaz de usuario (UI)
 ui <- navbarPage("Análisis CAP",
@@ -442,6 +454,7 @@ server <- function(input, output) {
         )
     }
   })
+  
   # Renderizar gráficos para variables de exposición
   output$plot_exp <- renderPlot({
     var <- input$var_exp
@@ -496,6 +509,7 @@ server <- function(input, output) {
         )
     }
   })
+  
   # Renderizar gráficos para puntajes
   output$plot_score <- renderPlot({
     var <- input$var_score
@@ -941,7 +955,7 @@ server <- function(input, output) {
     }
   )
   
-  # SECCIÓN 2: Variables Numéricas
+  # SECCIÓN 3: Variables Numéricas
   
   # Renderizar Scatterplot con geom_jitter
   output$scatter_plot <- renderPlot({
@@ -1165,61 +1179,6 @@ server <- function(input, output) {
       ggsave(file, plot = p, device = "png")
     }
   )
-  
-  # Renderizar Matriz de Correlaciones utilizando GGpairs con geom_jitter
-  output$corr_matrix_plot <- renderPlot({
-    # Definir las variables para la matriz de correlaciones
-    vars_corr <- c("Puntaje_C", "Puntaje_A", "Puntaje_P", "edad")
-    
-    # Verificar si todas las variables existen
-    if (!all(vars_corr %in% names(CAP))) {
-      showNotification("Una o más variables de la matriz de correlaciones no existen en el dataset.", type = "error")
-      return(NULL)
-    }
-    
-    # Verificar si todas las variables son numéricas
-    if (!all(sapply(CAP[, vars_corr], is.numeric))) {
-      showNotification("Todas las variables de la matriz de correlaciones deben ser numéricas.", type = "error")
-      return(NULL)
-    }
-    
-    data_corr <- CAP %>%
-      dplyr::select(all_of(vars_corr)) %>%
-      drop_na()
-    
-    # Verificar que después de drop_na hay suficientes filas
-    if (nrow(data_corr) < 2) {
-      showNotification("No hay suficientes datos después de eliminar NAs para calcular las correlaciones.", type = "error")
-      return(NULL)
-    }
-    
-    # Calcular la matriz de correlación y p-valores (aunque GGpairs no los usa directamente)
-    cor_results <- Hmisc::rcorr(as.matrix(data_corr), type = input$cor_method)
-    
-    cor_matrix <- cor_results$r
-    p_matrix <- cor_results$P
-    
-    # Verificar que las matrices de correlación y p-valores tienen las mismas dimensiones
-    if (!all(dim(cor_matrix) == dim(p_matrix))) {
-      showNotification("Las matrices de correlación y p-valores no tienen las mismas dimensiones.", type = "error")
-      return(NULL)
-    }
-    
-    # **Generar GGpairs con geom_jitter en los paneles de dispersión**
-    GGally::ggpairs(
-      data_corr,
-      lower = list(
-        continuous = wrap(
-          "points", 
-          alpha = 0.6, 
-          color = "blue",
-          position = position_jitter(width = 0.2, height = 0.2)  # Añadir jitter
-        )
-      ),
-      upper = list(continuous = wrap("cor", size = 5)),
-      diag = list(continuous = wrap("densityDiag"))
-    )
-  })
   
   # Descargar Matriz de Correlaciones (Solo GGpairs)
   output$downloadCorrMatrix <- downloadHandler(
