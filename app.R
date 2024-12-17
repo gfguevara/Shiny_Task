@@ -25,7 +25,9 @@ library(GGally)
 library(Hmisc)
 library(rlang)             # Para tidy evaluation
 
-
+library(readxl)
+CAP <- read_excel("CAP.xlsx")
+#View(CAP)
 
 # Interfaz de usuario (UI)
 ui <- navbarPage("Análisis CAP",
