@@ -7,45 +7,25 @@
 #install.packages("ggsave")
 
 
-library(shiny)
-library(ggplot2)
-library(dplyr)
-library(openxlsx)
-library(DT)
-library(readxl)
-library(viridis)
-library(readxl)
-
-CAP <- read_excel("CAP.xlsx")
-
-#View(CAP)
-
 # Cargar las librerías necesarias
 library(shiny)
 library(ggplot2)
 library(dplyr)
+library(tidyr)             # Para usar drop_na()
 library(broom)
 library(scales)
 library(tibble)
 library(RColorBrewer)
-library(multcomp)  # Para comparaciones post-hoc Tukey
+library(multcomp)
+library(corrplot)
+library(ggcorrplot)
+library(pheatmap)
+library(PerformanceAnalytics)
+library(GGally)
+library(Hmisc)
+library(rlang)             # Para tidy evaluation
 
-# Cargar el dataset
-# Asegúrate de que el archivo CAP_data.csv esté en el mismo directorio que este script
-# CAP <- read.csv("CAP_data.csv", stringsAsFactors = TRUE)
 
-# Definir una función para obtener paletas pastel con suficientes colores
-get_pastel_palette <- function(n, palette = "Pastel1") {
-  if (!(palette %in% rownames(brewer.pal.info))) {
-    stop("Palette name not found in RColorBrewer.")
-  }
-  max_colors <- brewer.pal.info[palette, "maxcolors"]
-  if (n <= max_colors) {
-    return(brewer.pal(n, palette))
-  } else {
-    return(colorRampPalette(brewer.pal(max_colors, palette))(n))
-  }
-}
 
 # Interfaz de usuario (UI)
 ui <- navbarPage("Análisis CAP",
@@ -95,7 +75,7 @@ ui <- navbarPage("Análisis CAP",
                                        )
                                      )
                             ),
-                            tabPanel("Variables de Exposición",
+                            tabPanel("Variable de Exposición",
                                      sidebarLayout(
                                        sidebarPanel(
                                          selectInput("var_exp", "Seleccione una variable de exposición:", 
@@ -196,10 +176,34 @@ ui <- navbarPage("Análisis CAP",
                             tabPanel("Variables Numéricas",
                                      sidebarLayout(
                                        sidebarPanel(
-                                         # Opciones para análisis de variables numéricas
+                                         h4("Scatterplots de Correlación"),
+                                         selectInput("scatter_pair", "Seleccione un par de variables:", 
+                                                     choices = c("Puntaje_C vs edad" = "Puntaje_C_vs_edad",
+                                                                 "Puntaje_A vs edad" = "Puntaje_A_vs_edad",
+                                                                 "Puntaje_P vs edad" = "Puntaje_P_vs_edad",
+                                                                 "Puntaje_C vs Puntaje_A" = "Puntaje_C_vs_Puntaje_A",
+                                                                 "Puntaje_C vs Puntaje_P" = "Puntaje_C_vs_Puntaje_P",
+                                                                 "Puntaje_A vs Puntaje_P" = "Puntaje_A_vs_Puntaje_P")),
+                                         selectInput("cor_method", "Seleccione el coeficiente de correlación:", 
+                                                     choices = c("Pearson" = "pearson", "Spearman" = "spearman")),
+                                         checkboxInput("add_trend", "Agregar línea de tendencia lineal", value = FALSE),
+                                         downloadButton("downloadScatter", "Descargar Scatterplot"),
+                                         hr(),
+                                         h4("Matriz de Correlaciones"),
+                                         # **Removido: selectInput para tipos de gráfica**
+                                         # **Solo se usará GGpairs**
+                                         downloadButton("downloadCorrMatrix", "Descargar Matriz de Correlaciones")
                                        ),
                                        mainPanel(
-                                         # Output para gráficos bivariados de variables numéricas
+                                         tabsetPanel(
+                                           tabPanel("Scatterplot",
+                                                    plotOutput("scatter_plot"),
+                                                    verbatimTextOutput("corr_coeff")
+                                           ),
+                                           tabPanel("Matriz de Correlaciones",
+                                                    plotOutput("corr_matrix_plot")  # Usar plotOutput directamente
+                                           )
+                                         )
                                        )
                                      )
                             )
@@ -271,7 +275,7 @@ server <- function(input, output) {
                         "Puntaje_P" = "Puntaje de Prácticas",
                         variable)
     
-    p <- ggplot(data, aes_string(x = variable)) +
+    p <- ggplot(data, aes(x = !!sym(variable))) +
       geom_histogram(aes(y = ..density..), bins = bins, fill = "#a8ddb5", color = "white", alpha = 0.7) +  # Pastel
       theme_minimal(base_size = 16) +
       labs(title = paste("Histograma de", var_label),
@@ -328,17 +332,17 @@ server <- function(input, output) {
       # Generar una paleta de colores pastel con suficiente número de colores
       colores_pastel <- get_pastel_palette(num_levels, "Pastel1")
       
-      ggplot(CAP, aes_string(x = var, fill = var)) +
+      ggplot(CAP, aes(x = !!sym(var), fill = !!sym(var))) +
         geom_bar(aes(y = (..count..) / sum(..count..))) +
         scale_fill_manual(values = colores_pastel) +
         scale_y_continuous(
           limits = c(0, 1), 
-          labels = percent_format(), 
+          labels = scales::percent_format(), 
           breaks = seq(0, 1, by = 0.1)
         ) +
         geom_text(
           aes(y = (..count..) / sum(..count..), 
-              label = percent((..count..) / sum(..count..), accuracy = 0.1)),
+              label = scales::percent((..count..) / sum(..count..), accuracy = 0.1)),
           stat = "count", 
           vjust = -0.5,  
           size = 5
@@ -358,7 +362,7 @@ server <- function(input, output) {
           plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
         )
     } else {
-      ggplot(CAP, aes_string(x = var)) +
+      ggplot(CAP, aes(x = !!sym(var))) +
         geom_histogram(bins = 30, fill = "#a6cee3", color = "white") +  # Pastel
         theme_minimal(base_size = 16) +
         labs(title = paste("Distribución de", var_label),
@@ -393,17 +397,17 @@ server <- function(input, output) {
       # Generar una paleta de colores pastel con suficiente número de colores
       colores_pastel <- get_pastel_palette(num_levels, "Pastel2")
       
-      ggplot(CAP, aes_string(x = var, fill = var)) +
+      ggplot(CAP, aes(x = !!sym(var), fill = !!sym(var))) +
         geom_bar(aes(y = (..count..) / sum(..count..))) +
         scale_fill_manual(values = colores_pastel) +
         scale_y_continuous(
           limits = c(0, 1), 
-          labels = percent_format(), 
+          labels = scales::percent_format(), 
           breaks = seq(0, 1, by = 0.1)
         ) +
         geom_text(
           aes(y = (..count..) / sum(..count..), 
-              label = percent((..count..) / sum(..count..), accuracy = 0.1)),
+              label = scales::percent((..count..) / sum(..count..), accuracy = 0.1)),
           stat = "count", 
           vjust = -0.5,  
           size = 5
@@ -423,7 +427,7 @@ server <- function(input, output) {
           plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
         )
     } else {
-      ggplot(CAP, aes_string(x = var)) +
+      ggplot(CAP, aes(x = !!sym(var))) +
         geom_histogram(bins = 30, fill = "#b2df8a", color = "white") +  # Pastel
         theme_minimal(base_size = 16) +
         labs(title = paste("Distribución de", var_label),
@@ -436,7 +440,60 @@ server <- function(input, output) {
         )
     }
   })
-  
+  # Renderizar gráficos para variables de exposición
+  output$plot_exp <- renderPlot({
+    var <- input$var_exp
+    var_label <- var  # Asumiendo que las etiquetas ya están en los niveles del factor
+    var_type <- class(CAP[[var]])
+    
+    if (var_type %in% c("factor", "character")) {
+      CAP[[var]] <- factor(CAP[[var]], levels = names(sort(table(CAP[[var]]), decreasing = TRUE)))
+      
+      ggplot(CAP, aes_string(x = var, fill = var)) +
+        geom_bar(aes(y = (..count..) / sum(..count..))) +
+        scale_fill_brewer(palette = "Pastel3") +
+        scale_y_continuous(
+          limits = c(0, 1), 
+          labels = percent_format(), 
+          breaks = seq(0, 1, by = 0.1)
+        ) +
+        geom_text(
+          aes(y = (..count..) / sum(..count..), 
+              label = percent((..count..) / sum(..count..), accuracy = 0.1)),
+          stat = "count", 
+          vjust = -0.5,  
+          size = 5
+        ) +
+        theme_minimal(base_size = 16) +
+        labs(title = paste("Distribución de", var_label),
+             x = "", 
+             y = "Porcentaje", 
+             caption = "Fuente: Encuesta de Conocimientos, Actitudes y Prácticas, departamento de La Libertad, 2023") +
+        theme(
+          axis.text.x = element_text(size = 14),
+          axis.ticks.x = element_blank(),
+          legend.position = "bottom",
+          legend.title = element_blank(),
+          axis.title = element_text(size = 18),
+          axis.text = element_text(size = 14),
+          legend.text = element_text(size = 14),
+          plot.caption = element_text(size = 12, hjust = 0.5, face = "italic"),
+          plot.title = element_text(size = 20, face = "bold", hjust = 0.5)
+        )
+    } else {
+      ggplot(CAP, aes_string(x = var)) +
+        geom_histogram(bins = 30, fill = "#fb9a99", color = "white") +  # Pastel
+        theme_minimal(base_size = 16) +
+        labs(title = paste("Distribución de", var_label),
+             x = var_label,
+             y = "Frecuencia") +
+        theme(
+          plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title = element_text(size = 18),
+          axis.text = element_text(size = 14)
+        )
+    }
+  })
   # Renderizar gráficos para puntajes
   output$plot_score <- renderPlot({
     var <- input$var_score
@@ -548,10 +605,10 @@ server <- function(input, output) {
     if (eliminar_outliers) {
       # Aplicar la fórmula Q1 - 1.5*IQR y Q3 + 1.5*IQR dentro de cada grupo
       data <- data %>%
-        group_by(.data[[var_dicot]]) %>%
+        group_by(!!sym(var_dicot)) %>%
         filter(
-          .data[[var_num]] >= (quantile(.data[[var_num]], 0.25, na.rm = TRUE) - 1.5 * IQR(.data[[var_num]], na.rm = TRUE)) &
-            .data[[var_num]] <= (quantile(.data[[var_num]], 0.75, na.rm = TRUE) + 1.5 * IQR(.data[[var_num]], na.rm = TRUE))
+          !!sym(var_num) >= (quantile(!!sym(var_num), 0.25, na.rm = TRUE) - 1.5 * IQR(!!sym(var_num), na.rm = TRUE)) &
+            !!sym(var_num) <= (quantile(!!sym(var_num), 0.75, na.rm = TRUE) + 1.5 * IQR(!!sym(var_num), na.rm = TRUE))
         ) %>%
         ungroup()
     }
@@ -560,7 +617,8 @@ server <- function(input, output) {
     num_levels <- length(unique(data[[var_dicot]]))
     colores_pastel <- get_pastel_palette(num_levels, "Pastel2")
     
-    p <- ggplot(data, aes_string(x = var_dicot, y = var_num, fill = var_dicot)) +
+    # Crear el boxplot utilizando tidy evaluation
+    p <- ggplot(data, aes(x = !!sym(var_dicot), y = !!sym(var_num), fill = !!sym(var_dicot))) +
       geom_boxplot() +
       scale_fill_manual(values = colores_pastel) +
       labs(title = paste("Boxplot de", var_num_label, "según", var_dicot_label),
@@ -575,11 +633,11 @@ server <- function(input, output) {
       )
     
     resumen <- data %>%
-      group_by(.data[[var_dicot]]) %>%
+      group_by(!!sym(var_dicot)) %>%
       summarise(
         N = n(),
-        `Promedio` = round(mean(.data[[var_num]], na.rm = TRUE), 2),
-        DE = round(sd(.data[[var_num]], na.rm = TRUE), 2)
+        `Promedio` = round(mean(!!sym(var_num), na.rm = TRUE), 2),
+        DE = round(sd(!!sym(var_num), na.rm = TRUE), 2)
       ) %>%
       rename("Grupo" = var_dicot)
     
@@ -629,7 +687,7 @@ server <- function(input, output) {
                 `Sum Sq` = round(`Sum Sq`, 3),
                 `Mean Sq` = round(`Mean Sq`, 3),
                 `F value` = round(`F value`, 3),
-                `Pr(>F)` = ifelse(`Pr(>F)` < 0.001, "< 0.001", round(`Pr(>F)`, 3))
+                `Pr(>F)` = ifelse(`Pr(>F)` < 0.001, "<0.001", round(`Pr(>F)`, 3))
               )
           }
         }
@@ -662,7 +720,7 @@ server <- function(input, output) {
               `Diferencia de medias` = round(tukey_df$diff, 3),
               `Límite Inferior` = round(tukey_df$lwr, 3),
               `Límite Superior` = round(tukey_df$upr, 3),
-              `p-valor` = ifelse(tukey_df$`p adj` < 0.001, "< 0.001", round(tukey_df$`p adj`, 3))
+              `p-valor` = ifelse(tukey_df$`p adj` < 0.001, "<0.001", round(tukey_df$`p adj`, 3))
             )
           }
         } else {
@@ -714,7 +772,7 @@ server <- function(input, output) {
         
         if (mostrar_prueba) {
           t_stat <- round(t_test_result$statistic, 3)
-          p_value <- ifelse(t_test_result$p.value < 0.001, "< 0.001", round(t_test_result$p.value, 3))
+          p_value <- ifelse(t_test_result$p.value < 0.001, "<0.001", round(t_test_result$p.value, 3))
           
           tabla_prueba <- tibble::tibble(
             `t` = t_stat,
@@ -880,6 +938,349 @@ server <- function(input, output) {
       }
     }
   )
+  
+  # SECCIÓN 2: Variables Numéricas
+  
+  # Renderizar Scatterplot con geom_jitter
+  output$scatter_plot <- renderPlot({
+    # Definir los pares de variables
+    pairs_list <- list(
+      "Puntaje_C_vs_edad" = c("Puntaje_C", "edad"),
+      "Puntaje_A_vs_edad" = c("Puntaje_A", "edad"),
+      "Puntaje_P_vs_edad" = c("Puntaje_P", "edad"),
+      "Puntaje_C_vs_Puntaje_A" = c("Puntaje_C", "Puntaje_A"),
+      "Puntaje_C_vs_Puntaje_P" = c("Puntaje_C", "Puntaje_P"),
+      "Puntaje_A_vs_Puntaje_P" = c("Puntaje_A", "Puntaje_P")
+    )
+    
+    # Obtener las variables seleccionadas
+    selected_pair <- pairs_list[[input$scatter_pair]]
+    x_var <- selected_pair[1]
+    y_var <- selected_pair[2]
+    
+    # Filtrar los datos para eliminar NAs en las variables seleccionadas
+    data_plot <- CAP %>%
+      dplyr::select(all_of(x_var), all_of(y_var)) %>%
+      drop_na()
+    
+    # Calcular el coeficiente de correlación
+    cor_method <- input$cor_method
+    cor_test <- cor.test(data_plot[[x_var]], data_plot[[y_var]], method = cor_method)
+    cor_coeff <- round(cor_test$estimate, 2)
+    cor_pval <- ifelse(cor_test$p.value < 0.001, "<0.001", round(cor_test$p.value, 3))
+    
+    # Crear el scatterplot utilizando tidy evaluation con geom_jitter
+    p <- ggplot(data_plot, aes(x = !!sym(x_var), y = !!sym(y_var))) +
+      geom_jitter(color = "#1f78b4", alpha = 0.6, size = 3, width = 0.2, height = 0.2) +  # Usar geom_jitter
+      theme_minimal(base_size = 16) +
+      labs(title = paste("Scatterplot de", x_var, "vs", y_var),
+           x = switch(x_var,
+                      "Puntaje_C" = "Puntaje de Conocimientos",
+                      "Puntaje_A" = "Puntaje de Actitudes",
+                      "Puntaje_P" = "Puntaje de Prácticas",
+                      "edad" = "Edad"),
+           y = switch(y_var,
+                      "Puntaje_C" = "Puntaje de Conocimientos",
+                      "Puntaje_A" = "Puntaje de Actitudes",
+                      "Puntaje_P" = "Puntaje de Prácticas",
+                      "edad" = "Edad")) +
+      theme(
+        plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+        axis.title = element_text(size = 18),
+        axis.text = element_text(size = 14)
+      )
+    
+    # Agregar línea de tendencia si se selecciona
+    if (input$add_trend) {
+      p <- p + geom_smooth(method = "lm", color = "red", se = FALSE)
+    }
+    
+    # Agregar el coeficiente de correlación en la gráfica
+    p <- p + annotate("text", 
+                      x = Inf, y = -Inf, 
+                      label = paste("r =", cor_coeff, "\n p =", cor_pval), 
+                      hjust = 1.1, vjust = -0.5, 
+                      size = 5, 
+                      color = "black")
+    
+    p
+  })
+  
+  # Mostrar el coeficiente de correlación debajo del scatterplot (opcional)
+  output$corr_coeff <- renderPrint({
+    # Definir los pares de variables
+    pairs_list <- list(
+      "Puntaje_C_vs_edad" = c("Puntaje_C", "edad"),
+      "Puntaje_A_vs_edad" = c("Puntaje_A", "edad"),
+      "Puntaje_P_vs_edad" = c("Puntaje_P", "edad"),
+      "Puntaje_C_vs_Puntaje_A" = c("Puntaje_C", "Puntaje_A"),
+      "Puntaje_C_vs_Puntaje_P" = c("Puntaje_C", "Puntaje_P"),
+      "Puntaje_A_vs_Puntaje_P" = c("Puntaje_A", "Puntaje_P")
+    )
+    
+    # Obtener las variables seleccionadas
+    selected_pair <- pairs_list[[input$scatter_pair]]
+    x_var <- selected_pair[1]
+    y_var <- selected_pair[2]
+    
+    # Filtrar los datos para eliminar NAs en las variables seleccionadas
+    data_plot <- CAP %>%
+      dplyr::select(all_of(x_var), all_of(y_var)) %>%
+      drop_na()
+    
+    # Calcular el coeficiente de correlación
+    cor_method <- input$cor_method
+    cor_test <- cor.test(data_plot[[x_var]], data_plot[[y_var]], method = cor_method)
+    cor_coeff <- round(cor_test$estimate, 2)
+    cor_pval <- ifelse(cor_test$p.value < 0.001, "<0.001", round(cor_test$p.value, 3))
+    
+    cat("Coeficiente de correlación:", cor_coeff, "\n",
+        "p-valor:", cor_pval)
+  })
+  
+  # Renderizar Matriz de Correlaciones utilizando GGpairs con geom_jitter
+  output$corr_matrix_plot <- renderPlot({
+    # Definir las variables para la matriz de correlaciones
+    vars_corr <- c("Puntaje_C", "Puntaje_A", "Puntaje_P", "edad")
+    
+    # Verificar si todas las variables existen
+    if (!all(vars_corr %in% names(CAP))) {
+      showNotification("Una o más variables de la matriz de correlaciones no existen en el dataset.", type = "error")
+      return(NULL)
+    }
+    
+    # Verificar si todas las variables son numéricas
+    if (!all(sapply(CAP[, vars_corr], is.numeric))) {
+      showNotification("Todas las variables de la matriz de correlaciones deben ser numéricas.", type = "error")
+      return(NULL)
+    }
+    
+    data_corr <- CAP %>%
+      dplyr::select(all_of(vars_corr)) %>%
+      drop_na()
+    
+    # Verificar que después de drop_na hay suficientes filas
+    if (nrow(data_corr) < 2) {
+      showNotification("No hay suficientes datos después de eliminar NAs para calcular las correlaciones.", type = "error")
+      return(NULL)
+    }
+    
+    # Calcular la matriz de correlación y p-valores (aunque GGpairs no los usa directamente)
+    cor_results <- Hmisc::rcorr(as.matrix(data_corr), type = input$cor_method)
+    
+    cor_matrix <- cor_results$r
+    p_matrix <- cor_results$P
+    
+    # Verificar que las matrices de correlación y p-valores tienen las mismas dimensiones
+    if (!all(dim(cor_matrix) == dim(p_matrix))) {
+      showNotification("Las matrices de correlación y p-valores no tienen las mismas dimensiones.", type = "error")
+      return(NULL)
+    }
+    
+    # **Generar GGpairs con geom_jitter en los paneles de dispersión**
+    GGally::ggpairs(
+      data_corr,
+      lower = list(
+        continuous = wrap(
+          "points", 
+          alpha = 0.6, 
+          color = "blue",
+          position = position_jitter(width = 0.2, height = 0.2)  # Añadir jitter
+        )
+      ),
+      upper = list(continuous = wrap("cor", size = 5)),
+      diag = list(continuous = wrap("densityDiag"))
+    )
+  })
+  
+  # Descargar Scatterplot
+  output$downloadScatter <- downloadHandler(
+    filename = function() {
+      paste("scatterplot_", input$scatter_pair, ".png", sep = "")
+    },
+    content = function(file) {
+      # Definir los pares de variables
+      pairs_list <- list(
+        "Puntaje_C_vs_edad" = c("Puntaje_C", "edad"),
+        "Puntaje_A_vs_edad" = c("Puntaje_A", "edad"),
+        "Puntaje_P_vs_edad" = c("Puntaje_P", "edad"),
+        "Puntaje_C_vs_Puntaje_A" = c("Puntaje_C", "Puntaje_A"),
+        "Puntaje_C_vs_Puntaje_P" = c("Puntaje_C", "Puntaje_P"),
+        "Puntaje_A_vs_Puntaje_P" = c("Puntaje_A", "Puntaje_P")
+      )
+      
+      # Obtener las variables seleccionadas
+      selected_pair <- pairs_list[[input$scatter_pair]]
+      x_var <- selected_pair[1]
+      y_var <- selected_pair[2]
+      
+      # Filtrar los datos para eliminar NAs en las variables seleccionadas
+      data_plot <- CAP %>%
+        dplyr::select(all_of(x_var), all_of(y_var)) %>%
+        drop_na()
+      
+      # Calcular el coeficiente de correlación
+      cor_method <- input$cor_method
+      cor_test <- cor.test(data_plot[[x_var]], data_plot[[y_var]], method = cor_method)
+      cor_coeff <- round(cor_test$estimate, 2)
+      cor_pval <- ifelse(cor_test$p.value < 0.001, "<0.001", round(cor_test$p.value, 3))
+      
+      # Crear el scatterplot utilizando tidy evaluation con geom_jitter
+      p <- ggplot(data_plot, aes(x = !!sym(x_var), y = !!sym(y_var))) +
+        geom_jitter(color = "#1f78b4", alpha = 0.6, size = 3, width = 0.2, height = 0.2) +  # Usar geom_jitter
+        theme_minimal(base_size = 16) +
+        labs(title = paste("Scatterplot de", x_var, "vs", y_var),
+             x = switch(x_var,
+                        "Puntaje_C" = "Puntaje de Conocimientos",
+                        "Puntaje_A" = "Puntaje de Actitudes",
+                        "Puntaje_P" = "Puntaje de Prácticas",
+                        "edad" = "Edad"),
+             y = switch(y_var,
+                        "Puntaje_C" = "Puntaje de Conocimientos",
+                        "Puntaje_A" = "Puntaje de Actitudes",
+                        "Puntaje_P" = "Puntaje de Prácticas",
+                        "edad" = "Edad")) +
+        theme(
+          plot.title = element_text(size = 20, face = "bold", hjust = 0.5),
+          axis.title = element_text(size = 18),
+          axis.text = element_text(size = 14)
+        )
+      
+      # Agregar línea de tendencia si se selecciona
+      if (input$add_trend) {
+        p <- p + geom_smooth(method = "lm", color = "red", se = FALSE)
+      }
+      
+      # Agregar el coeficiente de correlación en la gráfica
+      p <- p + annotate("text", 
+                        x = Inf, y = -Inf, 
+                        label = paste("r =", cor_coeff, "\n p =", cor_pval), 
+                        hjust = 1.1, vjust = -0.5, 
+                        size = 5, 
+                        color = "black")
+      
+      # Guardar la gráfica
+      ggsave(file, plot = p, device = "png")
+    }
+  )
+  
+  # Renderizar Matriz de Correlaciones utilizando GGpairs con geom_jitter
+  output$corr_matrix_plot <- renderPlot({
+    # Definir las variables para la matriz de correlaciones
+    vars_corr <- c("Puntaje_C", "Puntaje_A", "Puntaje_P", "edad")
+    
+    # Verificar si todas las variables existen
+    if (!all(vars_corr %in% names(CAP))) {
+      showNotification("Una o más variables de la matriz de correlaciones no existen en el dataset.", type = "error")
+      return(NULL)
+    }
+    
+    # Verificar si todas las variables son numéricas
+    if (!all(sapply(CAP[, vars_corr], is.numeric))) {
+      showNotification("Todas las variables de la matriz de correlaciones deben ser numéricas.", type = "error")
+      return(NULL)
+    }
+    
+    data_corr <- CAP %>%
+      dplyr::select(all_of(vars_corr)) %>%
+      drop_na()
+    
+    # Verificar que después de drop_na hay suficientes filas
+    if (nrow(data_corr) < 2) {
+      showNotification("No hay suficientes datos después de eliminar NAs para calcular las correlaciones.", type = "error")
+      return(NULL)
+    }
+    
+    # Calcular la matriz de correlación y p-valores (aunque GGpairs no los usa directamente)
+    cor_results <- Hmisc::rcorr(as.matrix(data_corr), type = input$cor_method)
+    
+    cor_matrix <- cor_results$r
+    p_matrix <- cor_results$P
+    
+    # Verificar que las matrices de correlación y p-valores tienen las mismas dimensiones
+    if (!all(dim(cor_matrix) == dim(p_matrix))) {
+      showNotification("Las matrices de correlación y p-valores no tienen las mismas dimensiones.", type = "error")
+      return(NULL)
+    }
+    
+    # **Generar GGpairs con geom_jitter en los paneles de dispersión**
+    GGally::ggpairs(
+      data_corr,
+      lower = list(
+        continuous = wrap(
+          "points", 
+          alpha = 0.6, 
+          color = "blue",
+          position = position_jitter(width = 0.2, height = 0.2)  # Añadir jitter
+        )
+      ),
+      upper = list(continuous = wrap("cor", size = 5)),
+      diag = list(continuous = wrap("densityDiag"))
+    )
+  })
+  
+  # Descargar Matriz de Correlaciones (Solo GGpairs)
+  output$downloadCorrMatrix <- downloadHandler(
+    filename = function() {
+      paste("matriz_correlaciones_ggpairs.png", sep = "")
+    },
+    content = function(file) {
+      # Definir las variables para la matriz de correlaciones
+      vars_corr <- c("Puntaje_C", "Puntaje_A", "Puntaje_P", "edad")
+      
+      # Comprobar si todas las variables existen
+      if (!all(vars_corr %in% names(CAP))) {
+        showNotification("Una o más variables de la matriz de correlaciones no existen en el dataset.", type = "error")
+        return(NULL)
+      }
+      
+      # Verificar si todas las variables son numéricas
+      if (!all(sapply(CAP[, vars_corr], is.numeric))) {
+        showNotification("Todas las variables de la matriz de correlaciones deben ser numéricas.", type = "error")
+        return(NULL)
+      }
+      
+      data_corr <- CAP %>%
+        dplyr::select(all_of(vars_corr)) %>%
+        drop_na()
+      
+      # Verificar que después de drop_na hay suficientes filas
+      if (nrow(data_corr) < 2) {
+        showNotification("No hay suficientes datos después de eliminar NAs para calcular las correlaciones.", type = "error")
+        return(NULL)
+      }
+      
+      # Calcular la matriz de correlación y p-valores (aunque GGpairs no los usa directamente)
+      cor_results <- Hmisc::rcorr(as.matrix(data_corr), type = input$cor_method)
+      
+      cor_matrix <- cor_results$r
+      p_matrix <- cor_results$P
+      
+      # Verificar que las matrices de correlación y p-valores tienen las mismas dimensiones
+      if (!all(dim(cor_matrix) == dim(p_matrix))) {
+        showNotification("Las matrices de correlación y p-valores no tienen las mismas dimensiones.", type = "error")
+        return(NULL)
+      }
+      
+      # **Generar únicamente GGpairs y guardarlo con geom_jitter**
+      png(file, width = 1200, height = 1000)
+      print(GGally::ggpairs(
+        data_corr,
+        lower = list(
+          continuous = wrap(
+            "points", 
+            alpha = 0.6, 
+            color = "blue",
+            position = position_jitter(width = 0.2, height = 0.2)  # Añadir jitter
+          )
+        ),
+        upper = list(continuous = wrap("cor", size = 5)),
+        diag = list(continuous = wrap("densityDiag"))
+      ))
+      dev.off()
+    }
+  )
+  
 }
 
 # Ejecutar la aplicación
