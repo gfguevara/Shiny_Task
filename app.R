@@ -129,7 +129,8 @@ ui <- navbarPage("Análisis CAP",
                                      sidebarLayout(
                                        sidebarPanel(
                                          selectInput("var_dicot", "Seleccione una variable dicotómica:", 
-                                                     choices = c("Mes de la encuesta" = "mes", 
+                                                     choices = c("Mes de la encuesta" = "mes",
+                                                                 "Area de residencia" = "area",
                                                                  "Participación previa" = "part_prev", 
                                                                  "Mayor de 65 años" = "edad_dicot", 
                                                                  "Estudios superiores" = "edu_sup", 
@@ -159,7 +160,7 @@ ui <- navbarPage("Análisis CAP",
                                      sidebarLayout(
                                        sidebarPanel(
                                          selectInput("var_nom_indep", "Seleccione una variable independiente:", 
-                                                     choices = c("Municipio" = "muni", 
+                                                     choices = c("Municipio" = "muni",
                                                                  "Grupos Etarios" = "etario", 
                                                                  "Nivel Educativo" = "nivel_edu", 
                                                                  "Situación de Empleo" = "empleo_si", 
@@ -591,6 +592,7 @@ server <- function(input, output) {
   generar_boxplot_y_tablas <- function(data, var_dicot, var_num, mostrar_IC, mostrar_prueba, eliminar_outliers, mostrar_posthoc = FALSE) {
     var_dicot_label <- switch(var_dicot,
                               "mes" = "Mes de la encuesta",
+                              "area" = "Area de residencia",
                               "part_prev" = "Participación previa",
                               "edad_dicot" = "Mayor de 65 años",
                               "edu_sup" = "Estudios superiores",
