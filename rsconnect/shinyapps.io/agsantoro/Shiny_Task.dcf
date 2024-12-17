@@ -1,0 +1,12 @@
+name: Shiny_Task
+title: Shiny_Task
+username: agsantoro
+account: agsantoro
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 13612281
+bundleId: 9534324
+url: https://agsantoro.shinyapps.io/Shiny_Task/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
